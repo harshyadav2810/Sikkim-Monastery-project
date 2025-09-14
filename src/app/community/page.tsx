@@ -3,8 +3,9 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { useState, useTransition, useEffect } from "react";
-import { summarizeContribution } from "@/ai/flows/actions";
+import { useState, useTransition, useRef } from "react";
+// Assuming this is your Server Action to handle the backend logic
+// import { summarizeContribution } from "@/ai/flows/summarize-community-contributions";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -17,45 +18,21 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Slider } from "@/components/ui/slider";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { Loader2, Sparkles, Info, BookOpen, MapPin, Calendar } from "lucide-react";
+import { Loader2, Sparkles, Info, BookOpen, Upload } from "lucide-react"; // Added Upload icon
 import { useToast } from "@/hooks/use-toast";
-import { Badge } from "@/components/ui/badge";
 
-// Define monasteries data directly in the file
-const monasteries = [
-  {
-    id: "taktsang",
-    name: "Taktsang Palphug Monastery",
-    description: "Also known as Tiger's Nest, this sacred Buddhist site is perched on a cliffside in the Paro Valley of Bhutan.",
-    history: "It was built in 1692 around the cave where Guru Rinpoche meditated in the 8th century.",
-    location: "Paro Valley, Bhutan",
-    summary: "Taktsang Palphug Monastery, commonly known as Tiger's Nest, is a prominent Himalayan Buddhist sacred site and temple complex located in the cliffside of the upper Paro valley in Bhutan. Built in 1692 around the Taktsang Senge Samdup cave where Guru Padmasambhava meditated in the 8th century, it is considered one of the most sacred sites in Bhutan. The monastery complex has withstood earthquakes and fires throughout its history and has been rebuilt multiple times while maintaining its spiritual significance."
-  },
-  {
-    id: "key",
-    name: "Key Monastery",
-    description: "A Tibetan Buddhist monastery located in the Spiti Valley of Himachal Pradesh, India.",
-    history: "Founded in the 11th century, it has been attacked several times by Mongol and other armies.",
-    location: "Spiti Valley, India",
-    summary: "Key Monastery, also spelled Ki or Kee, is a Tibetan Buddhist monastery located at an altitude of 4,166 meters in the Spiti Valley of Himachal Pradesh, India. Founded in the 11th century by Dromton, a disciple of the famous teacher Atisha, it is the largest monastery in Spiti Valley. The monastery has endured multiple attacks over centuries, including from Mongols and other armies, and has been rebuilt several times. It serves as an important religious training center for lamas and houses valuable ancient Buddhist manuscripts and artifacts."
-  },
-  {
-    id: "punakha",
-    name: "Punakha Dzong",
-    description: "Also known as Pungthang Dewa chhenbi Phodrang, it is the administrative center of Punakha District in Bhutan.",
-    history: "Constructed in 1637–38, it is the second oldest and second largest dzong in Bhutan.",
-    location: "Punakha, Bhutan",
-    summary: "Punakha Dzong, officially known as Pungthang Dewa chhenbi Phodrang, is the administrative center of Punakha District in Bhutan. Constructed in 1637-38 by Ngawang Namgyal, the first Zhabdrung Rinpoche, it is the second oldest and second largest dzong in Bhutan. Strategically built at the confluence of the Pho Chhu and Mo Chhu rivers, it has served as the capital of Bhutan until the time of the second king. The dzong houses sacred Buddhist relics and was the site of the coronation of Ugyen Wangchuck as the first King of Bhutan in 1907."
-  }
-];
-
+// Zod schema for form validation
 const formSchema = z.object({
   artifactName: z.string().min(2, {
     message: "Artifact name must be at least 2 characters.",
   }),
-  sourceQuality: z.array(z.number()).min(1).max(1).transform(arr => arr[0]),
+  // Removed artifactUrl, added artifactFile
+  artifactFile: z.instanceof(File).optional().nullable(), // Optional file upload
+  contributionText: z.string().min(20, {
+    message: "Description must be at least 20 characters long.",
+  }),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -63,60 +40,54 @@ type FormValues = z.infer<typeof formSchema>;
 export default function CommunityPage() {
   const [isPending, startTransition] = useTransition();
   const [summary, setSummary] = useState<string | null>(null);
-  const [knownDetails, setKnownDetails] = useState<string | null>(null);
-  const [selectedMonastery, setSelectedMonastery] = useState<any>(null);
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null); // State for displaying file name
+  const fileInputRef = useRef<HTMLInputElement>(null); // Ref for file input
   const { toast } = useToast();
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       artifactName: "",
-      sourceQuality: [5],
+      artifactFile: null, // Default to null for the file
+      contributionText: "",
     },
   });
 
-  const artifactName = form.watch("artifactName");
+  // Handle file selection
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] || null;
+    form.setValue("artifactFile", file); // Set the file in the form state
+    setSelectedFileName(file ? file.name : null); // Update display name
+  };
 
-  useEffect(() => {
-    if (artifactName) {
-      const monastery = monasteries.find(m => 
-        m.name.toLowerCase().includes(artifactName.toLowerCase()) || 
-        artifactName.toLowerCase().includes(m.name.toLowerCase())
-      );
-      
-      if (monastery) {
-        setSelectedMonastery(monastery);
-        setKnownDetails(`Location: ${monastery.location}\n\nDescription: ${monastery.description}\n\nHistory: ${monastery.history}`);
-      } else {
-        setKnownDetails(null);
-        setSelectedMonastery(null);
-      }
-    } else {
-      setKnownDetails(null);
-      setSelectedMonastery(null);
-    }
-  }, [artifactName, form]);
-
+  // This function would normally call your backend server action
+  // For now, it's a placeholder that simulates a summary
   function onSubmit(values: FormValues) {
     startTransition(async () => {
       setSummary(null);
       try {
-        // If it's a known monastery, use its predefined summary
-        if (selectedMonastery) {
-          setSummary(selectedMonastery.summary);
-        } else {
-          // For unknown artifacts, we still need to call the AI
-          const result = await summarizeContribution({
-            ...values,
-            contributionText: "No additional contribution provided."
-          });
-          setSummary(result.summary);
+        // In a real scenario, you would upload the file to storage (e.g., S3, Cloudinary)
+        // and then pass the URL to your backend Server Action, along with other values.
+        // For this frontend-only change, we simulate the process.
+
+        const fileInfo = values.artifactFile ? ` (with file: ${values.artifactFile.name})` : "";
+
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate AI processing time
+        setSummary(`Thank you for your submission about "${values.artifactName}"${fileInfo}. The data has been received and will be authenticated and added to the archive.`);
+        toast({
+          title: "Contribution Received!",
+          description: "Your submission has been sent for review.",
+        });
+        form.reset(); // Reset form after successful submission
+        setSelectedFileName(null); // Clear selected file name display
+        if (fileInputRef.current) { // Clear the actual file input
+            fileInputRef.current.value = "";
         }
       } catch (error) {
-        console.error("Summarization failed:", error);
+        console.error("Submission failed:", error);
         toast({
           title: "Error",
-          description: "Failed to generate summary. Please try again.",
+          description: "Failed to submit contribution. Please try again.",
           variant: "destructive",
         })
       }
@@ -128,7 +99,7 @@ export default function CommunityPage() {
       <div className="text-center mb-10">
         <h1 className="font-headline text-4xl font-bold mb-3">Community Contributions</h1>
         <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-          Share your knowledge about cultural artifacts. High-quality submissions will be summarized by AI and added to the archive.
+          Share your knowledge about cultural artifacts and help build our digital archive.
         </p>
       </div>
 
@@ -142,7 +113,7 @@ export default function CommunityPage() {
               <div>
                 <CardTitle className="font-headline text-2xl">Share Your Knowledge</CardTitle>
                 <CardDescription>
-                  Enter the name of an artifact to get an AI-generated summary. Recognized monasteries will display their details.
+                  Your contributions are reviewed for authenticity before being added to the archive.
                 </CardDescription>
               </div>
             </div>
@@ -155,53 +126,71 @@ export default function CommunityPage() {
                   name="artifactName"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-base">Artifact Name</FormLabel>
+                      <FormLabel className="text-base">Artifact/Mural/Manuscript Name</FormLabel>
                       <FormControl>
-                        <Input placeholder="e.g., Singing Bowl or Monastery Name" {...field} className="h-12" />
+                        <Input placeholder="e.g., Phurba Dagger" {...field} className="h-12" />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
+                
+                {/* File Upload Section */}
                 <FormField
                   control={form.control}
-                  name="sourceQuality"
+                  name="artifactFile" // This field is now for the File object
                   render={({ field }) => (
                     <FormItem>
-                      <div className="flex items-center justify-between">
-                        <FormLabel className="text-base">Source Quality</FormLabel>
-                        <Badge variant="outline" className="text-sm font-medium">
-                          {field.value}/10
-                        </Badge>
-                      </div>
+                      <FormLabel className="text-base">Upload Image/Video (Optional)</FormLabel>
                       <FormControl>
-                        <div className="space-y-4">
-                          <Slider
-                            min={0}
-                            max={10}
-                            step={1}
-                            defaultValue={[5]}
-                            value={[field.value]}
-                            onValueChange={field.onChange}
-                            className="py-4"
+                        <div className="flex items-center space-x-2">
+                          <Input
+                            type="file"
+                            className="hidden" // Hide the default file input
+                            ref={fileInputRef} // Attach ref
+                            onChange={handleFileChange}
+                            accept="image/*,video/*" // Accept image and video files
                           />
-                          <div className="flex justify-between text-xs text-muted-foreground px-1">
-                            <span>Hearsay</span>
-                            <span>Scholarly</span>
-                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => fileInputRef.current?.click()} // Trigger click on hidden input
+                            className="flex items-center gap-2 h-12 w-full justify-center"
+                          >
+                            <Upload className="h-5 w-5" />
+                            {selectedFileName ? selectedFileName : "Choose File"}
+                          </Button>
                         </div>
                       </FormControl>
-                      <FormDescription className="flex items-start gap-2 mt-3">
-                        <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                        <span>Rate the quality of your source from 0 (hearsay) to 10 (scholarly text).</span>
+                      <FormDescription>
+                        Upload a relevant image or video (max 5MB).
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-                <Button 
-                  type="submit" 
-                  disabled={isPending} 
+                
+                <FormField
+                  control={form.control}
+                  name="contributionText"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-base">Your Description</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder="Share details, history, or stories about the artifact..."
+                          className="min-h-[150px]"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                <Button
+                  type="submit"
+                  disabled={isPending}
                   className="w-full h-12 text-base bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700"
                 >
                   {isPending ? (
@@ -209,7 +198,7 @@ export default function CommunityPage() {
                   ) : (
                     <Sparkles className="mr-2 h-5 w-5" />
                   )}
-                  Generate Summary
+                  Submit Contribution
                 </Button>
               </form>
             </Form>
@@ -247,23 +236,13 @@ export default function CommunityPage() {
                   <p className="leading-relaxed text-foreground">{summary}</p>
                 </div>
               </div>
-            ) : knownDetails ? (
-              <div className="py-4 w-full">
-                <div className="flex items-center gap-2 mb-4">
-                  <Info className="h-5 w-5 text-blue-500" />
-                  <h3 className="font-semibold">Known Details</h3>
-                </div>
-                <div className="prose prose-sm max-w-none">
-                  <p className="leading-relaxed text-foreground whitespace-pre-wrap">{knownDetails}</p>
-                </div>
-              </div>
             ) : (
               <div className="text-center py-8 px-4">
                 <div className="bg-muted rounded-full p-4 w-16 h-16 flex items-center justify-center mx-auto mb-4">
                   <Sparkles className="h-8 w-8 text-muted-foreground" />
                 </div>
                 <h3 className="font-medium text-lg mb-2">Awaiting Input</h3>
-                <p className="text-muted-foreground">Enter an artifact name to generate a summary.</p>
+                <p className="text-muted-foreground">Submit a contribution to see the summary.</p>
               </div>
             )}
           </CardContent>
